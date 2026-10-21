@@ -20,6 +20,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import tools.jackson.databind.json.JsonMapper;
 
 @AutoConfigureRestTestClient
 @Import({
@@ -44,8 +45,29 @@ public class MovieEventKafkaTest {
     private BlockingQueue<Message<MovieAddedEvent>> queue;
 
     @Test
-    public void movieAddedEvent() {
+    public void movieAddedEvent() throws InterruptedException {
+        var json = """
+                {"title":"My Life Without Me","voteAverage":5.941,"voteCount":421,"releaseDate":"2003-03-07","revenue":12300000,"runtime":106,"backdropPath":"/kZyurQjTMLHalUxs7sHgH5XeiwO.jpg","budget":2500000,"homepage":"http://www.clubcultura.com/clubcine/clubcineastas/isabelcoixet/mividasinmi/index.htm","overview":"A fatally ill mother with only two months to live creates a list of things she wants to do before she dies without telling her family of her illness.","popularity":13.52,"posterPath":"/sFSkn5rrQqXJkRNa2rMWqzmEuhR.jpg","genres":["Drama","Romance"]}
+                """;
+        var request = JsonMapper.shared().readValue(json, MovieDetails.class);
+        var response = this.testClient.post()
+                .uri("/api/movies")
+                .body(request)
+                .exchange()
+                .expectStatus().is2xxSuccessful()
+                .returnResult(MovieDetails.class)
+                .getResponseBody();
 
+        Assertions.assertNotNull(response);
+        Assertions.assertNotNull(response.id());
+        Assertions.assertEquals("My Life Without Me", response.title());
+
+        var message = this.queue.poll(5, TimeUnit.SECONDS);
+        Assertions.assertNotNull(message);
+        var event = message.getPayload();
+        Assertions.assertEquals(response.id(), message.getHeaders().get(KafkaHeaders.RECEIVED_KEY, Integer.class));
+        Assertions.assertEquals(response.id(), event.movieId());
+        Assertions.assertEquals("My Life Without Me", event.title());
     }
 
     @TestConfiguration

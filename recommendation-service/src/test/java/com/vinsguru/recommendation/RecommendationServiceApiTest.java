@@ -1,13 +1,22 @@
 package com.vinsguru.recommendation;
 
+import com.vinsguru.netflux.events.CustomerGenreUpdatedEvent;
+import com.vinsguru.recommendation.dto.MovieRecommendations;
+import com.vinsguru.recommendation.dto.RecommendationType;
+import java.time.Instant;
+import java.util.List;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.resttestclient.autoconfigure.AutoConfigureRestTestClient;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.cloud.stream.binder.test.EnableTestBinder;
 import org.springframework.cloud.stream.binder.test.InputDestination;
+import org.springframework.core.ParameterizedTypeReference;
+import org.springframework.integration.support.MessageBuilder;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.test.web.servlet.client.RestTestClient;
+import tools.jackson.databind.json.JsonMapper;
 
 @SpringBootTest
 @EnableTestBinder
@@ -23,12 +32,40 @@ public class RecommendationServiceApiTest {
 
     @Test
     public void recommendations() {
+        List<MovieRecommendations> recommendations = this.testClient.get()
+                .uri("/api/recommendations/1")
+                .exchange()
+                .expectStatus().is2xxSuccessful()
+                .returnResult(new ParameterizedTypeReference<List<MovieRecommendations>>() {
+                }).getResponseBody();
+        Assertions.assertNotNull(recommendations);
+        Assertions.assertEquals(2, recommendations.size());
 
+        Assertions.assertEquals(RecommendationType.NEWLY_ADDED, recommendations.getFirst().type());
+        Assertions.assertEquals(9, recommendations.getFirst().movies().size());
+
+        Assertions.assertEquals(RecommendationType.PERSONALIZED, recommendations.getLast().type());
+        Assertions.assertEquals(4, recommendations.getLast().movies().size());
     }
 
     @Test
-    public void recommendationsStream() {
-
+    public void recommendationsStream() throws InterruptedException {
+        var event = new CustomerGenreUpdatedEvent(2, "Sci-Fi", Instant.now());
+        this.inputDestination.send(MessageBuilder.withPayload(event).build(), "customer-events");
+        Thread.sleep(100);
+        String response = this.testClient.get()
+                .uri("/api/recommendations/2/stream")
+                .exchange()
+                .expectStatus().is2xxSuccessful()
+                .returnResult(String.class)
+                .getResponseBody();
+        Assertions.assertNotNull(response);
+        // to remove "data:"
+        var recommendation = JsonMapper.shared().readValue(response.substring(5), MovieRecommendations.class);
+        System.out.println(recommendation);
+        Assertions.assertEquals(RecommendationType.PERSONALIZED, recommendation.type());
+        Assertions.assertEquals(2, recommendation.customerId());
+        Assertions.assertEquals(4, recommendation.movies().size());
     }
 
 }
